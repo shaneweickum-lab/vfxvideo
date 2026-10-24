@@ -1,279 +1,323 @@
 VFXVIDEO PLATFORM DESIGN
-Working draft v0.1 (Phase 1: Idea and Requirements / Phase 2: Technology Validation)
-Status: PROPOSAL. Nothing here is approved until the open decisions in Section 9 are answered.
+Working draft v0.2 (Phase 1: Requirements / Phase 2: Technology Validation)
+Status: PROPOSAL. Stack in Section 4 awaits approval (see Section 10).
+
+===============================================================================
+0. DECISIONS SO FAR
+===============================================================================
+  D1  Audience       Internal tool + educational. Possibly commercial later.
+  D2  Platform       PWA (installable web app) first.
+  D3  Languages      Team knows neither Rust nor C++ yet.
+  D4  Dev machine    MacBook Pro, Apple M5, 24 GB unified memory.
+  D5  Open source    Yes.
+  D6  Scope added    A Procreate-style drawing and animation studio.
 
 ===============================================================================
 1. VISION
 ===============================================================================
 
-One application that does three jobs on one engine:
+A complete art studio in one application, on one engine:
 
-  - Image editing      (single frame: layers, masks, adjustments, retouch)
-  - Video editing      (timeline: cuts, trims, transitions, audio, export)
-  - VFX / compositing  (node graph: keying, roto, tracking, merges, 3D)
+  - Draw     Procreate-style painting and frame-by-frame animation
+  - Photo    image editing: layers, masks, adjustments, retouch
+  - Edit     video editing: timeline, cuts, transitions, audio, export
+  - Comp     VFX compositing: node graph, keying, roto, tracking
 
-Later, a fourth job is added on top of the same engine:
+Later, our own AI is added on top of the same engine, as tools inside
+these pages (segmentation, matting, upscaling, inpainting, interpolation,
+eventually generation).
 
-  - Our own AI         (segmentation, matting, upscaling, inpainting,
-                        interpolation, eventually generation)
+Guiding rule: master the deterministic craft first. AI arrives only once
+the engine, file format, color pipeline and editing tools are solid.
 
-The guiding rule: master the deterministic craft first. AI arrives only once
-the engine, file format, color pipeline and editing tools are solid, because
-every AI feature we build later will be trained on, evaluated against, and
-plugged into those foundations.
+Because this is also an educational project, every stage produces both
+working software and written notes explaining how it works (docs/learn/).
 
 ===============================================================================
-2. THE CORE ARCHITECTURAL IDEA: ONE ENGINE, THREE VIEWS
+2. THE CORE ARCHITECTURAL IDEA: ONE ENGINE, FOUR PAGES
 ===============================================================================
 
-Most suites (Adobe) ship separate apps for photo, video and VFX. DaVinci
-Resolve and Nuke show the better path: a single processing engine with
-different user-facing "pages".
+Everything is a NODE GRAPH evaluated over TIME. The pages are different
+views of the same underlying document.
 
-Everything in the platform is a NODE GRAPH evaluated over TIME.
-
-  - An image edit      = a graph evaluated at one frame.
-                         Layers in the UI are just a linear stack of nodes.
-  - A video edit       = a timeline of clips; each clip owns a small graph
-                         (color, effects), transitions are nodes between clips.
-  - A VFX shot         = a full graph exposed directly to the artist.
+  - Draw   a stack of paint layers; each paint layer is a node whose
+           content is stroke data + raster tiles. An animation is the
+           same stack with a different raster per frame.
+  - Photo  a graph evaluated at one frame; layers are a linear node stack.
+  - Edit   a timeline of clips; each clip owns a small graph.
+  - Comp   the full graph exposed to the artist.
 
 Consequences:
-  - Every tool is written once and works in all three modes.
-  - Projects are fully non-destructive: source media is never altered,
-    only the graph is saved.
-  - A future AI model is simply another node type ("Segment", "Upscale",
-    "Inpaint"). No redesign required when AI arrives.
+  - A brush, blend mode, or blur is written once and works everywhere.
+  - An animation drawn in Draw drops straight onto the Edit timeline or
+    into a Comp graph as a clip. No export/import step.
+  - Projects are non-destructive: source media is never altered.
+  - A future AI model is just another node type. No redesign needed.
 
-  +---------------------------------------------------------------+
-  |  UI LAYER    [ Photo page ]  [ Edit page ]  [ Composite page ] |
-  +---------------------------------------------------------------+
-  |  DOCUMENT    Project / Timeline / Node Graph / Undo history     |
-  +---------------------------------------------------------------+
-  |  ENGINE      Graph evaluator, scheduler, frame cache            |
-  +---------------------------------------------------------------+
-  |  PROCESSING  GPU compute kernels  |  CPU fallback kernels       |
-  +---------------------------------------------------------------+
-  |  MEDIA I/O   Decode/encode (video, image seq, audio)            |
-  |  COLOR       Color management (scene-linear working space)      |
-  +---------------------------------------------------------------+
-  |  PLATFORM    GPU abstraction, threads, memory, filesystem       |
-  +---------------------------------------------------------------+
+  +----------------------------------------------------------------+
+  |  UI         [ Draw ]  [ Photo ]  [ Edit ]  [ Comp ]               |
+  +----------------------------------------------------------------+
+  |  DOCUMENT   Project / Layers / Timeline / Graph / Undo / Cmd log  |
+  +----------------------------------------------------------------+
+  |  ENGINE     Graph evaluator, scheduler, frame + tile caches       |
+  +----------------------------------------------------------------+
+  |  GPU        WebGPU compute + render (WGSL shaders)                |
+  +----------------------------------------------------------------+
+  |  MEDIA      WebCodecs decode/encode, image I/O, audio             |
+  |  COLOR      scene-linear working space, view transforms           |
+  +----------------------------------------------------------------+
+  |  STORAGE    OPFS (browser private disk), File System Access API   |
+  +----------------------------------------------------------------+
 
-===============================================================================
-3. REQUIREMENTS (draft)
-===============================================================================
-
-3.1 Functional, by mastery stage (detail in Section 6)
-  - Import/export common image formats (PNG, JPEG, TIFF, EXR, RAW later)
-  - Import/export common video (H.264, H.265, ProRes, DNxHR, image sequences)
-  - Non-destructive layered image editing
-  - Multi-track timeline editing with audio
-  - Node-based compositing with keying, roto, 2D/3D tracking
-  - Professional color pipeline (ACES / OCIO)
-  - Project save/load in an open, versioned, human-diffable format
-
-3.2 Non-functional
-  - Performance: real-time playback of 4K 10-bit footage on a modern GPU
-    (stretch target); interactive (<100 ms) parameter feedback on 1080p.
-  - Precision: 32-bit float internal processing; no banding or clipping
-    inside the pipeline.
-  - Determinism: same project + same media = bit-identical render on the
-    same hardware. This matters enormously for testing now and for AI
-    training data later.
-  - Crash safety: autosave + journaled undo; a crash never loses more than
-    a few seconds of work.
-  - Extensibility: a plugin/node API from early on, even if only we use it.
-
-3.3 AI-readiness requirements (built now, used later)
-  These cost little today and save a rewrite later:
-  - Frames are GPU buffers with an explicit layout so they can be handed
-    to a tensor runtime (zero-copy where possible).
-  - Every user operation is a structured, logged command
-    (e.g. {op: "roto.add_point", node: 12, frame: 48, x, y}).
-    With user consent, these logs become the training data for assistive AI.
-  - Rich metadata stored per asset (camera, lens, color space, timecode).
-  - A clean "node contract" so an ML model is a drop-in node.
-  - Data provenance from day one: we record where every training-eligible
-    asset came from and its license. Our own AI must be trainable on data
-    we have the right to use.
+The ENGINE and everything below it must never touch the DOM or UI code.
+That rule is what lets us wrap the app natively later without a rewrite.
 
 ===============================================================================
-4. TECHNOLOGY RECOMMENDATION (needs approval)
+3. CAN THIS BE A PWA? (Technology validation)
 ===============================================================================
 
-Recommendation: NATIVE DESKTOP application. A browser app cannot yet
-match native for 4K/EXR/ProRes throughput, GPU memory control, and
-large-file I/O. A web companion (review, sharing) can come later.
+Short answer: YES for what we need now. Learning, an internal tool,
+drawing, image editing, HD/4K editing of common camera codecs, and 2D
+compositing all work. The browser became viable for this in 2025-2026
+because these pieces now ship in the browsers we care about:
 
-4.1 Core language - two credible options
+  - WebGPU     GPU compute and rendering. Chrome on Mac, and Safari 26
+               on macOS Tahoe and iPadOS 26 (on by default).
+  - WebCodecs  hardware video decode/encode (uses the M5 media engine).
+  - OPFS       fast private on-disk storage for caches and projects.
+  - Pointer Events with pressure, tilt and coalesced/predicted events,
+               which is what Apple Pencil drawing needs in Safari.
 
-  Option A: Rust (recommended for a new codebase)
-    + Memory safety in a heavily multithreaded engine (fewer crash bugs)
-    + Modern tooling (cargo, tests, benchmarks built in)
-    + wgpu gives one GPU API over Vulkan / Metal / DirectX 12
-    - Smaller VFX ecosystem; we bind to C/C++ libraries via FFI
-    - Steeper learning curve if the team does not know Rust
+Big bonus of PWA: the SAME app runs on the MacBook and on an iPad with
+Apple Pencil. The Draw page is meant for the iPad.
 
-  Option B: C++20 (the industry standard)
-    + Every VFX library is native C++ (VFX Reference Platform)
-    + Huge pool of experienced VFX engineers
-    - Memory-safety bugs are the #1 source of crashes in creative apps
-    - Build tooling (CMake, vcpkg/conan) is heavier
+3.1 Honest limits, and how we handle them
 
-  The deciding factor is the team's existing skill (see Section 9).
+  Limit                                Mitigation
+  -----------------------------------  ----------------------------------
+  Safari lacks WebAssembly 64-bit      Keep big data in GPU textures and
+  memory (wasm heap capped ~4 GB).     OPFS, not in the wasm heap. Fine
+                                       for our sizes.
+  Safari only offers OPFS, not full    Chrome = primary dev browser on Mac
+  read/write to user folders.          (full File System Access). Safari
+                                       uses import/export + OPFS.
+  ProRes / DNxHR / RAW decode is not   Start with H.264, HEVC, AV1, VP9,
+  reliably available via WebCodecs.    PNG/JPEG/EXR sequences. Pro codecs
+                                       move to the native stage (3.2).
+  No OpenColorIO in the browser.       Implement ACES transforms in WGSL;
+                                       bake other OCIO configs to 3D LUTs
+                                       offline with OCIO's tools.
+  Real-time 4K EXR sequences are too   Proxies + disk cache. True 4K EXR
+  heavy for the browser.               work is a native-stage goal.
+  Browser can evict storage.           Request persistent storage; projects
+                                       are always exportable to a file.
 
-4.2 Proven libraries to build on (do not reinvent these)
-  - FFmpeg (libav*)    video/audio decode and encode
-  - OpenImageIO        image file I/O
-  - OpenEXR            high-dynamic-range VFX image format
-  - OpenColorIO + ACES color management
-  - OpenTimelineIO     timeline interchange (import/export edits from
-                       Premiere, Resolve, Avid)
-  - OpenFX (OFX)       optional: host third-party effects plugins later
-  - USD                later, for 3D scene interchange
-  Licenses must be checked before shipping (FFmpeg LGPL vs GPL builds
-  matter for a commercial product).
-
-4.3 GPU
-  - Rust: wgpu (WGSL shaders).  C++: Vulkan + Metal, or a thin wrapper.
-  - CPU reference implementation of every node, used for tests and as
-    the "ground truth" the GPU path is checked against.
-
-4.4 UI
-  - Rust: Slint, egui, or Qt via bindings.
-  - C++: Qt 6 (used by Nuke, Maya, Houdini, Resolve).
-  - The viewer (image/video display) is always our own GPU surface,
-    regardless of UI toolkit.
-
-4.5 Later, for AI
-  - Training: Python + PyTorch (unavoidable and fine; it is offline).
-  - Inference inside the app: ONNX Runtime or a native runtime, so the
-    shipped app does not depend on Python.
-  - Start with small, task-specific models (segmentation, matting,
-    upscaling). Smallest model that does the job well.
+3.2 Path to native later (when commercial or pro-codec needs arrive)
+  - Wrap the same web app in Tauri (macOS shell, small download).
+  - Move hot paths (codecs, EXR, heavy filters) to Rust, compiled both
+    to WebAssembly (for the PWA) and native (for the desktop app).
+  - Nothing in Stages 0-4 is wasted; the engine/UI split makes this a
+    port, not a rewrite.
 
 ===============================================================================
-5. PROPOSED REPOSITORY STRUCTURE (once stack is approved)
+4. TECHNOLOGY STACK (proposed, needs approval)
 ===============================================================================
 
-  vfxvideo/
-    docs/                 design docs, decisions (ADRs), agent docs
-    crates/ or libs/
-      core/               math, image buffers, pixel formats, errors
-      color/              OCIO integration, working-space conversions
-      media/              decode/encode, frame cache, audio
-      graph/              node graph model + evaluator + scheduler
-      nodes/              built-in node library (CPU + GPU kernels)
-      document/           project format, undo/redo, command log
-      timeline/           tracks, clips, edits, OTIO import/export
-      render/             offline render queue, export presets
-      devtools/           development debugger (dev builds only)
-    app/                  desktop application + UI pages
-    tests/
-      golden/             reference images: render must match these
-      perf/               playback and render benchmarks
-    tools/                scripts, CI helpers
+4.1 Language: TypeScript
+  Since the team knows neither Rust nor C++, TypeScript is the best
+  starting point: the browser is its native home, the learning material
+  is enormous, errors are caught by the type checker, and WebGPU's
+  shader language (WGSL) is learned alongside it. Rust enters later,
+  only where measured performance demands it.
+
+4.2 Tooling
+  - Vite            dev server and build; PWA plugin for install/offline
+  - Vitest          unit tests
+  - Playwright      browser tests + golden-image (pixel) tests
+  - ESLint/Prettier lint and format
+  - pnpm            package manager, monorepo workspaces
+
+4.3 UI
+  - Solid or React for panels and menus (decide in Phase 3 plan).
+  - Canvas viewers are our own WebGPU surfaces, never DOM drawing.
+
+4.4 Libraries (open source, license-compatible)
+  - mediabunny (or mp4box.js)   read/write MP4/MOV/WebM containers
+  - WebCodecs (built-in)        decode/encode video and audio frames
+  - Web Audio API (built-in)    audio playback, mixing, sync
+  - ffmpeg.wasm                 optional fallback for odd formats (slow)
+  - OpenEXR via wasm or a TS    EXR read/write
+    EXR reader
+  - ACES reference transforms   ported to WGSL
+  - OpenTimelineIO format       timeline interchange (JSON, implement
+                                reader/writer in TS)
+  Every dependency is checked for license before adoption. We avoid
+  GPL-only libraries so a commercial option stays open.
+
+4.5 Project license (recommendation)
+  Apache-2.0 for our code: open source, allows commercial use, includes
+  a patent grant. (Alternative: MPL-2.0 if we want changes to our files
+  to stay open.) Needs your decision before the first code commit.
+
+4.6 AI later
+  - Training: Python + PyTorch, offline.
+  - In-app inference: ONNX Runtime Web (WebGPU backend), later native.
+  - Small, task-specific models first.
+
+===============================================================================
+5. THE DRAW PAGE (Procreate-style studio)
+===============================================================================
+
+5.1 Input
+  - Apple Pencil via Pointer Events: pressure, tilt (altitude/azimuth),
+    coalesced events for smooth strokes, predicted events for low lag.
+  - Palm rejection: ignore touch input while a pen is in contact.
+  - Gestures (Procreate conventions): two-finger tap = undo,
+    three-finger tap = redo, pinch = zoom/rotate, touch-and-hold =
+    eyedropper, quick-shape (hold at end of stroke to straighten).
+
+5.2 Brush engine
+  - Stamp-based: a stroke is a series of "dabs" placed along the path.
+  - Brush = shape texture + grain texture + spacing, scatter, jitter,
+    rotation, pressure/tilt curves, opacity/flow, streamline smoothing.
+  - Dabs rendered on the GPU into the layer.
+  - Later: wet/smudge mixing, brush import, brush studio editor.
+
+5.3 Canvas
+  - Tiled raster (e.g. 256x256 tiles): large canvases, only touched
+    tiles use memory, undo stores only changed tiles.
+  - Layers, groups, blend modes, opacity, alpha lock, clipping masks,
+    reference layers. Shared with the Photo page.
+  - Selections and transforms (free, distort, warp). Shared with Photo.
+  - Every stroke saved as its raw input samples as well as pixels, which
+    enables stroke replay (time-lapse) and, later, AI training data
+    (with consent).
+
+5.4 Animation (like Procreate Animation Assist, then beyond)
+  - Frame-by-frame: each frame is a layer state; frame strip timeline.
+  - Onion skin (frames before/after, color and opacity controls).
+  - Frames per second, hold duration per frame, loop / ping-pong / once.
+  - Background and foreground (non-animated) layers.
+  - Export: GIF, MP4, PNG sequence, animated WebP.
+  - Send to Edit timeline or Comp graph as a live clip.
+  - Later: keyframed transforms, tweening, audio scrubbing for lip sync.
 
 ===============================================================================
 6. ROADMAP: MASTERY STAGES
 ===============================================================================
 
-Each stage ends with a measurable "mastery gate". We do not move on until
-the gate passes. Stages are sequenced so each one builds on the last.
+Each stage ends with a measurable gate. We do not move on until it passes.
 
 STAGE 0 - Foundations and Development Debugger
-  - Build system, CI, test harness, golden-image test framework
-  - Development debugger: frame inspector (pixel values, channels,
-    color space), graph evaluation timings, GPU memory, cache stats, logs
-  - Image buffer types (8/16/32-bit, half float), CPU + GPU upload
-  - Color pipeline: load OCIO config, view transforms
-  - Read/write PNG, JPEG, TIFF, EXR
-  GATE: open an EXR, apply exposure on GPU, display with correct view
-        transform, pixel values match CPU reference exactly.
+  - Repo, build, CI, PWA shell, test harness, golden-image tests
+  - Dev debugger (dev builds only): pixel inspector, GPU memory, timings,
+    cache stats, logs, current batch/feature id
+  - Image buffers (8-bit, 16-bit float, 32-bit float) on the GPU
+  - Color: scene-linear working space, sRGB/Display P3 view transforms
+  - Load/save PNG, JPEG, EXR; project save/load to OPFS and to file
+  GATE: open an EXR, adjust exposure on the GPU, display on the MacBook's
+        P3 screen with correct values matching a CPU reference.
 
-STAGE 1 - Image Editing
-  - Node graph engine (internally), layer stack (UI)
-  - Transforms with high-quality filtering, crop, resize
+STAGE 1 - Photo: Image Editing
+  - Tiled layer system, blend modes, masks, transforms, crop
   - Adjustments: exposure, levels, curves, HSL, white balance, LUTs
-  - Masks: shapes, gradients, feathering; blend modes
-  - Selections; later: brushes, clone/heal, text
-  - Undo/redo, project save/load, export
-  GATE: a real retouch job completed start to finish in our tool,
-        compared side by side with Photoshop/Affinity output.
+  - Selections, undo/redo, export
+  GATE: a real retouch job finished in our app, compared side by side
+        with an established editor.
 
-STAGE 2 - Video Playback and Editing
-  - Decode pipeline, frame cache, background prefetch
-  - Audio playback and sync
-  - Timeline: tracks, clips, trim/ripple/roll/slip/slide, transitions
-  - Per-clip color and effects (reuse Stage 1 nodes)
-  - Render queue and export presets
-  - OpenTimelineIO import/export
-  GATE: cut a 5-minute multi-track 4K project, real-time playback,
-        frame-accurate export, audio in sync.
+STAGE 2 - Draw: Painting and Animation
+  - Pencil input, brush engine, gestures, streamline
+  - Frame-by-frame animation, onion skin, export
+  GATE: on iPad with Apple Pencil, paint an illustration and a 2-second
+        looping animation with no perceptible input lag.
 
-STAGE 3 - VFX Compositing (2D)
-  - Node graph editor exposed to the user
-  - Merge operations, premultiplication done correctly
-  - Keying: chroma / difference / luminance keyers, spill suppression
-  - Rotoscoping: bezier and B-spline shapes, per-point feather, motion blur
-  - 2D tracking (point, planar), stabilization, corner pin
-  - Grain, blur/defocus, glow, distortion, lens distortion
-  GATE: complete a green-screen composite and a screen replacement
-        shot to a professional standard.
+STAGE 3 - Edit: Video
+  - WebCodecs decode, frame cache, prefetch, proxies
+  - Web Audio playback and sync
+  - Timeline: tracks, trim/ripple/roll/slip/slide, transitions, titles
+  - Per-clip effects (reuse Stage 1 nodes); Draw animations as clips
+  - Export via WebCodecs; OpenTimelineIO import/export
+  GATE: cut a 5-minute multi-track 4K H.264/HEVC project on the M5 with
+        real-time playback, frame-accurate export, audio in sync.
 
-STAGE 4 - Advanced VFX
-  - 3D camera solve (matchmove)
-  - 3D compositing workspace: cards, cameras, projections
-  - Particles, deep compositing (EXR deep), USD interchange
+STAGE 4 - Comp: 2D VFX
+  - Node graph editor; merges and correct premultiplication
+  - Keying (chroma/difference/luma), spill suppression
+  - Rotoscoping (bezier, B-spline, feathering, motion blur)
+  - 2D point and planar tracking, stabilization, corner pin
+  - Blur/defocus, glow, grain, lens distortion
+  GATE: a professional-standard green-screen composite and a screen
+        replacement shot.
+
+STAGE 5 - Native and Advanced VFX (only if needed by then)
+  - Tauri desktop build, Rust hot paths, pro codecs, full OCIO
+  - 3D camera solve, 3D compositing, particles, USD
   GATE: integrate a CG element into tracked live-action footage.
 
-STAGE 5 - AI (only after Stages 0-3 gates pass)
-  Order chosen so each model accelerates a tool we already master:
-  1. Segmentation assist for roto (click-to-mask)
-  2. AI matting / keying refinement
+STAGE 6 - AI (after Stages 0-4 gates pass)
+  1. Click-to-mask segmentation for roto and selections
+  2. Matting / keying refinement
   3. Upscaling and denoising
-  4. Frame interpolation / retiming
-  5. Object removal / inpainting (image, then video)
+  4. Frame interpolation (also: in-betweening for Draw animations)
+  5. Object removal / inpainting
   6. Generative features
-  Pre-requisites already in place by then: command logs, golden tests,
-  node contract, tensor-compatible buffers, data provenance records.
+  Prepared from Stage 0: command logs, stroke logs, golden tests, node
+  contract, GPU buffers usable as tensors, data provenance records.
 
 ===============================================================================
-7. TESTING STRATEGY
+7. AI-READINESS REQUIREMENTS (built now, used later)
 ===============================================================================
-  - Unit tests per library.
-  - Golden-image tests: every node renders known inputs; output must match
-    a stored reference within a strict tolerance. CPU vs GPU parity tests.
-  - Performance benchmarks tracked in CI so regressions are caught.
-  - Format round-trip tests (save -> load -> save is identical).
-  - Later for AI: fixed evaluation sets with numeric metrics.
+  - Every user action is a structured command in a log
+    (e.g. {op: "brush.stroke", layer: 3, samples: [...]}).
+  - Strokes stored as raw pen samples, not only pixels.
+  - Rich metadata per asset (source, color space, timecode, license).
+  - Data provenance: we record where every asset came from and whether
+    we may train on it. Our AI must be trained only on data we have the
+    right to use, including explicit consent from any users.
+  - Deterministic rendering so outputs can be compared and evaluated.
 
 ===============================================================================
-8. RISKS
+8. PROPOSED REPOSITORY STRUCTURE
 ===============================================================================
-  - Scope: this is the scope of DaVinci Resolve. Mitigation: staged gates,
-    no stage skipped, image editing first because it is the smallest.
-  - Performance: video playback is the hardest engineering problem here.
-    Mitigation: frame cache and GPU pipeline designed in Stage 0, not
-    bolted on in Stage 2.
-  - Codec licensing (H.264/H.265 patents, FFmpeg licensing). Needs a
-    human decision before any commercial release.
-  - Color correctness: easy to get subtly wrong. Mitigation: OCIO + tests.
-  - AI training data rights. Mitigation: provenance from day one.
+  vfxvideo/
+    docs/              design, decisions (ADRs), agent docs
+      learn/           educational notes, one per stage
+    packages/
+      core/            math, buffers, pixel formats, errors (no DOM)
+      gpu/             WebGPU device, shaders, texture pool (no DOM)
+      color/           working space, view transforms, LUTs (no DOM)
+      media/           decode/encode, containers, audio (no DOM)
+      document/        project format, undo, command log (no DOM)
+      graph/           node graph + evaluator (no DOM)
+      nodes/           built-in nodes: WGSL + CPU reference (no DOM)
+      paint/           brush engine, tiles, strokes (no DOM)
+      timeline/        tracks, clips, OTIO (no DOM)
+      devtools/        development debugger (dev builds only)
+      app/             the PWA: UI, the four pages, input handling
+    tests/
+      golden/          reference images
+      perf/            benchmarks
 
 ===============================================================================
-9. OPEN DECISIONS (human owner must answer before planning continues)
+9. RISKS
 ===============================================================================
-  D1. Who is it for? Our own studio's internal tool, or a commercial product?
-  D2. Target operating systems: Windows, macOS, Linux (which first)?
-  D3. Team languages: Rust, C++, or neither yet? (decides Section 4.1)
-  D4. Native desktop (recommended) or must it run in a browser?
-  D5. Target hardware: which GPUs do we develop and test on?
-  D6. Is open source an option (affects library licensing choices)?
+  - Scope: this is Procreate + Photoshop + Premiere + Nuke. Mitigation:
+    strict stage gates; the engine is shared so each stage gets cheaper.
+  - Browser memory and performance ceilings. Mitigation: GPU-resident
+    data, tiling, proxies, and a planned native path (Stage 5).
+  - Safari/WebKit features lag Chrome. Mitigation: test both from day
+    one; feature-detect and degrade gracefully.
+  - Codec patents (H.264/HEVC) if commercial: we use the OS's hardware
+    codecs via WebCodecs, which is the safer route; revisit before sale.
+  - AI data rights: provenance from day one.
 
 ===============================================================================
-NEXT STEP
+10. STILL NEEDED BEFORE CODING
 ===============================================================================
-Answer D1-D6. Then: produce the Phase 3 architectural plan (data model,
-module boundaries, project file format) and start Stage 0.
+  A1. Approve the stack: PWA, TypeScript + WebGPU/WGSL, Vite, pnpm.
+  A2. Pick the license: Apache-2.0 (recommended) or MPL-2.0.
+  A3. Do you have an iPad with Apple Pencil (iPadOS 26) for the Draw page?
+  A4. Confirm stage order: Photo (1) before Draw (2), or Draw first?
+
+NEXT STEP: Phase 3 architectural plan (data model, project file format,
+node contract, module boundaries), then Stage 0.
