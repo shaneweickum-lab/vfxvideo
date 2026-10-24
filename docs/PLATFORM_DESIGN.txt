@@ -1,0 +1,279 @@
+VFXVIDEO PLATFORM DESIGN
+Working draft v0.1 (Phase 1: Idea and Requirements / Phase 2: Technology Validation)
+Status: PROPOSAL. Nothing here is approved until the open decisions in Section 9 are answered.
+
+===============================================================================
+1. VISION
+===============================================================================
+
+One application that does three jobs on one engine:
+
+  - Image editing      (single frame: layers, masks, adjustments, retouch)
+  - Video editing      (timeline: cuts, trims, transitions, audio, export)
+  - VFX / compositing  (node graph: keying, roto, tracking, merges, 3D)
+
+Later, a fourth job is added on top of the same engine:
+
+  - Our own AI         (segmentation, matting, upscaling, inpainting,
+                        interpolation, eventually generation)
+
+The guiding rule: master the deterministic craft first. AI arrives only once
+the engine, file format, color pipeline and editing tools are solid, because
+every AI feature we build later will be trained on, evaluated against, and
+plugged into those foundations.
+
+===============================================================================
+2. THE CORE ARCHITECTURAL IDEA: ONE ENGINE, THREE VIEWS
+===============================================================================
+
+Most suites (Adobe) ship separate apps for photo, video and VFX. DaVinci
+Resolve and Nuke show the better path: a single processing engine with
+different user-facing "pages".
+
+Everything in the platform is a NODE GRAPH evaluated over TIME.
+
+  - An image edit      = a graph evaluated at one frame.
+                         Layers in the UI are just a linear stack of nodes.
+  - A video edit       = a timeline of clips; each clip owns a small graph
+                         (color, effects), transitions are nodes between clips.
+  - A VFX shot         = a full graph exposed directly to the artist.
+
+Consequences:
+  - Every tool is written once and works in all three modes.
+  - Projects are fully non-destructive: source media is never altered,
+    only the graph is saved.
+  - A future AI model is simply another node type ("Segment", "Upscale",
+    "Inpaint"). No redesign required when AI arrives.
+
+  +---------------------------------------------------------------+
+  |  UI LAYER    [ Photo page ]  [ Edit page ]  [ Composite page ] |
+  +---------------------------------------------------------------+
+  |  DOCUMENT    Project / Timeline / Node Graph / Undo history     |
+  +---------------------------------------------------------------+
+  |  ENGINE      Graph evaluator, scheduler, frame cache            |
+  +---------------------------------------------------------------+
+  |  PROCESSING  GPU compute kernels  |  CPU fallback kernels       |
+  +---------------------------------------------------------------+
+  |  MEDIA I/O   Decode/encode (video, image seq, audio)            |
+  |  COLOR       Color management (scene-linear working space)      |
+  +---------------------------------------------------------------+
+  |  PLATFORM    GPU abstraction, threads, memory, filesystem       |
+  +---------------------------------------------------------------+
+
+===============================================================================
+3. REQUIREMENTS (draft)
+===============================================================================
+
+3.1 Functional, by mastery stage (detail in Section 6)
+  - Import/export common image formats (PNG, JPEG, TIFF, EXR, RAW later)
+  - Import/export common video (H.264, H.265, ProRes, DNxHR, image sequences)
+  - Non-destructive layered image editing
+  - Multi-track timeline editing with audio
+  - Node-based compositing with keying, roto, 2D/3D tracking
+  - Professional color pipeline (ACES / OCIO)
+  - Project save/load in an open, versioned, human-diffable format
+
+3.2 Non-functional
+  - Performance: real-time playback of 4K 10-bit footage on a modern GPU
+    (stretch target); interactive (<100 ms) parameter feedback on 1080p.
+  - Precision: 32-bit float internal processing; no banding or clipping
+    inside the pipeline.
+  - Determinism: same project + same media = bit-identical render on the
+    same hardware. This matters enormously for testing now and for AI
+    training data later.
+  - Crash safety: autosave + journaled undo; a crash never loses more than
+    a few seconds of work.
+  - Extensibility: a plugin/node API from early on, even if only we use it.
+
+3.3 AI-readiness requirements (built now, used later)
+  These cost little today and save a rewrite later:
+  - Frames are GPU buffers with an explicit layout so they can be handed
+    to a tensor runtime (zero-copy where possible).
+  - Every user operation is a structured, logged command
+    (e.g. {op: "roto.add_point", node: 12, frame: 48, x, y}).
+    With user consent, these logs become the training data for assistive AI.
+  - Rich metadata stored per asset (camera, lens, color space, timecode).
+  - A clean "node contract" so an ML model is a drop-in node.
+  - Data provenance from day one: we record where every training-eligible
+    asset came from and its license. Our own AI must be trainable on data
+    we have the right to use.
+
+===============================================================================
+4. TECHNOLOGY RECOMMENDATION (needs approval)
+===============================================================================
+
+Recommendation: NATIVE DESKTOP application. A browser app cannot yet
+match native for 4K/EXR/ProRes throughput, GPU memory control, and
+large-file I/O. A web companion (review, sharing) can come later.
+
+4.1 Core language - two credible options
+
+  Option A: Rust (recommended for a new codebase)
+    + Memory safety in a heavily multithreaded engine (fewer crash bugs)
+    + Modern tooling (cargo, tests, benchmarks built in)
+    + wgpu gives one GPU API over Vulkan / Metal / DirectX 12
+    - Smaller VFX ecosystem; we bind to C/C++ libraries via FFI
+    - Steeper learning curve if the team does not know Rust
+
+  Option B: C++20 (the industry standard)
+    + Every VFX library is native C++ (VFX Reference Platform)
+    + Huge pool of experienced VFX engineers
+    - Memory-safety bugs are the #1 source of crashes in creative apps
+    - Build tooling (CMake, vcpkg/conan) is heavier
+
+  The deciding factor is the team's existing skill (see Section 9).
+
+4.2 Proven libraries to build on (do not reinvent these)
+  - FFmpeg (libav*)    video/audio decode and encode
+  - OpenImageIO        image file I/O
+  - OpenEXR            high-dynamic-range VFX image format
+  - OpenColorIO + ACES color management
+  - OpenTimelineIO     timeline interchange (import/export edits from
+                       Premiere, Resolve, Avid)
+  - OpenFX (OFX)       optional: host third-party effects plugins later
+  - USD                later, for 3D scene interchange
+  Licenses must be checked before shipping (FFmpeg LGPL vs GPL builds
+  matter for a commercial product).
+
+4.3 GPU
+  - Rust: wgpu (WGSL shaders).  C++: Vulkan + Metal, or a thin wrapper.
+  - CPU reference implementation of every node, used for tests and as
+    the "ground truth" the GPU path is checked against.
+
+4.4 UI
+  - Rust: Slint, egui, or Qt via bindings.
+  - C++: Qt 6 (used by Nuke, Maya, Houdini, Resolve).
+  - The viewer (image/video display) is always our own GPU surface,
+    regardless of UI toolkit.
+
+4.5 Later, for AI
+  - Training: Python + PyTorch (unavoidable and fine; it is offline).
+  - Inference inside the app: ONNX Runtime or a native runtime, so the
+    shipped app does not depend on Python.
+  - Start with small, task-specific models (segmentation, matting,
+    upscaling). Smallest model that does the job well.
+
+===============================================================================
+5. PROPOSED REPOSITORY STRUCTURE (once stack is approved)
+===============================================================================
+
+  vfxvideo/
+    docs/                 design docs, decisions (ADRs), agent docs
+    crates/ or libs/
+      core/               math, image buffers, pixel formats, errors
+      color/              OCIO integration, working-space conversions
+      media/              decode/encode, frame cache, audio
+      graph/              node graph model + evaluator + scheduler
+      nodes/              built-in node library (CPU + GPU kernels)
+      document/           project format, undo/redo, command log
+      timeline/           tracks, clips, edits, OTIO import/export
+      render/             offline render queue, export presets
+      devtools/           development debugger (dev builds only)
+    app/                  desktop application + UI pages
+    tests/
+      golden/             reference images: render must match these
+      perf/               playback and render benchmarks
+    tools/                scripts, CI helpers
+
+===============================================================================
+6. ROADMAP: MASTERY STAGES
+===============================================================================
+
+Each stage ends with a measurable "mastery gate". We do not move on until
+the gate passes. Stages are sequenced so each one builds on the last.
+
+STAGE 0 - Foundations and Development Debugger
+  - Build system, CI, test harness, golden-image test framework
+  - Development debugger: frame inspector (pixel values, channels,
+    color space), graph evaluation timings, GPU memory, cache stats, logs
+  - Image buffer types (8/16/32-bit, half float), CPU + GPU upload
+  - Color pipeline: load OCIO config, view transforms
+  - Read/write PNG, JPEG, TIFF, EXR
+  GATE: open an EXR, apply exposure on GPU, display with correct view
+        transform, pixel values match CPU reference exactly.
+
+STAGE 1 - Image Editing
+  - Node graph engine (internally), layer stack (UI)
+  - Transforms with high-quality filtering, crop, resize
+  - Adjustments: exposure, levels, curves, HSL, white balance, LUTs
+  - Masks: shapes, gradients, feathering; blend modes
+  - Selections; later: brushes, clone/heal, text
+  - Undo/redo, project save/load, export
+  GATE: a real retouch job completed start to finish in our tool,
+        compared side by side with Photoshop/Affinity output.
+
+STAGE 2 - Video Playback and Editing
+  - Decode pipeline, frame cache, background prefetch
+  - Audio playback and sync
+  - Timeline: tracks, clips, trim/ripple/roll/slip/slide, transitions
+  - Per-clip color and effects (reuse Stage 1 nodes)
+  - Render queue and export presets
+  - OpenTimelineIO import/export
+  GATE: cut a 5-minute multi-track 4K project, real-time playback,
+        frame-accurate export, audio in sync.
+
+STAGE 3 - VFX Compositing (2D)
+  - Node graph editor exposed to the user
+  - Merge operations, premultiplication done correctly
+  - Keying: chroma / difference / luminance keyers, spill suppression
+  - Rotoscoping: bezier and B-spline shapes, per-point feather, motion blur
+  - 2D tracking (point, planar), stabilization, corner pin
+  - Grain, blur/defocus, glow, distortion, lens distortion
+  GATE: complete a green-screen composite and a screen replacement
+        shot to a professional standard.
+
+STAGE 4 - Advanced VFX
+  - 3D camera solve (matchmove)
+  - 3D compositing workspace: cards, cameras, projections
+  - Particles, deep compositing (EXR deep), USD interchange
+  GATE: integrate a CG element into tracked live-action footage.
+
+STAGE 5 - AI (only after Stages 0-3 gates pass)
+  Order chosen so each model accelerates a tool we already master:
+  1. Segmentation assist for roto (click-to-mask)
+  2. AI matting / keying refinement
+  3. Upscaling and denoising
+  4. Frame interpolation / retiming
+  5. Object removal / inpainting (image, then video)
+  6. Generative features
+  Pre-requisites already in place by then: command logs, golden tests,
+  node contract, tensor-compatible buffers, data provenance records.
+
+===============================================================================
+7. TESTING STRATEGY
+===============================================================================
+  - Unit tests per library.
+  - Golden-image tests: every node renders known inputs; output must match
+    a stored reference within a strict tolerance. CPU vs GPU parity tests.
+  - Performance benchmarks tracked in CI so regressions are caught.
+  - Format round-trip tests (save -> load -> save is identical).
+  - Later for AI: fixed evaluation sets with numeric metrics.
+
+===============================================================================
+8. RISKS
+===============================================================================
+  - Scope: this is the scope of DaVinci Resolve. Mitigation: staged gates,
+    no stage skipped, image editing first because it is the smallest.
+  - Performance: video playback is the hardest engineering problem here.
+    Mitigation: frame cache and GPU pipeline designed in Stage 0, not
+    bolted on in Stage 2.
+  - Codec licensing (H.264/H.265 patents, FFmpeg licensing). Needs a
+    human decision before any commercial release.
+  - Color correctness: easy to get subtly wrong. Mitigation: OCIO + tests.
+  - AI training data rights. Mitigation: provenance from day one.
+
+===============================================================================
+9. OPEN DECISIONS (human owner must answer before planning continues)
+===============================================================================
+  D1. Who is it for? Our own studio's internal tool, or a commercial product?
+  D2. Target operating systems: Windows, macOS, Linux (which first)?
+  D3. Team languages: Rust, C++, or neither yet? (decides Section 4.1)
+  D4. Native desktop (recommended) or must it run in a browser?
+  D5. Target hardware: which GPUs do we develop and test on?
+  D6. Is open source an option (affects library licensing choices)?
+
+===============================================================================
+NEXT STEP
+===============================================================================
+Answer D1-D6. Then: produce the Phase 3 architectural plan (data model,
+module boundaries, project file format) and start Stage 0.
