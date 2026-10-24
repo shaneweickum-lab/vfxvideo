@@ -1,0 +1,344 @@
+VFXVIDEO ARCHITECTURE PLAN
+Phase 3: Architectural Planning. Version 0.1.
+Status: PROPOSAL awaiting approval. No application code exists yet.
+Read with: docs/PLATFORM_DESIGN.txt (the why); this file is the how.
+
+CONTENTS
+  1. Stack
+  2. Repository layout and dependency rules
+  3. Runtime model (threads, workers, GPU ownership)
+  4. Data model
+  5. The node contract
+  6. Commands, undo and the command log
+  7. Project file format
+  8. Color pipeline
+  9. Storage
+  10. Development debugger
+  11. Testing strategy
+  12. Devices and browsers
+  13. Hosting and deployment
+  14. Stage 0 feature batches
+  15. Risks specific to this plan
+  16. Human-owned tasks
+
+===============================================================================
+1. STACK
+===============================================================================
+  Language     TypeScript (strict mode everywhere)
+  App          Next.js 16 (App Router), React 19
+  Output       Static export (next.config: output: "export").
+               The app is pure client-side; no server is required.
+  Look         Tailwind CSS + shadcn/ui (Radix primitives), dark theme
+  GPU          WebGPU + WGSL shaders
+  Media        WebCodecs, Web Audio, mediabunny (containers)
+  Offline      Service worker (Serwist) + web app manifest
+  Monorepo     pnpm workspaces + Turborepo for task caching
+  Tests        Vitest (packages), Playwright (browser, golden images)
+  Lint         ESLint + Prettier
+  CI           GitHub Actions: typecheck, lint, unit tests, build
+  License      Apache-2.0
+
+Why Next.js works here: we use it for routing, layout, the UI toolkit and
+the developer experience. We do NOT use its server features (server
+rendering of the canvas, API routes, image optimization). Every page that
+touches WebGPU is a client component, and the engine is loaded only in
+the browser. If we later want accounts, sharing or cloud renders, we can
+drop static export and add server routes without restructuring.
+
+===============================================================================
+2. REPOSITORY LAYOUT AND DEPENDENCY RULES
+===============================================================================
+
+  vfxvideo/
+    apps/
+      web/                 Next.js PWA: routes, UI, panels, input
+        app/               App Router routes
+          (studio)/photo   Photo page
+          (studio)/edit    Edit page (Stage 2)
+          (studio)/comp    Comp page (Stage 3)
+          (studio)/draw    Draw page (Stage 4)
+          dev/             development debugger (dev builds only)
+        components/        shadcn/ui and app components
+        lib/               UI-side glue (engine client, hooks)
+    packages/
+      core/                math, ids, rational time, errors, events
+      gpu/                 device, texture pool, shader registry, viewer
+      color/               working space, transforms, LUTs
+      io/                  image read/write (PNG, JPEG, EXR)
+      media/               video/audio decode, encode, containers (Stage 2)
+      document/            data model, commands, undo, file format
+      graph/               node graph, evaluator, cache
+      nodes/               built-in nodes (WGSL + CPU reference)
+      timeline/            tracks, clips, OTIO (Stage 2)
+      paint/               brush engine, tiles, strokes (Stage 4)
+      engine/              worker entry: owns GPU, runs the graph
+      devtools/            diagnostics collectors used by /dev
+    tests/
+      golden/              reference images + golden test runner
+      perf/                benchmarks
+    docs/
+      learn/               educational notes per stage
+      decisions/           architecture decision records (ADRs)
+
+Dependency rules (enforced by lint):
+  - packages/* NEVER import React, Next.js, or DOM-only APIs.
+    (Worker-safe browser APIs like WebGPU and WebCodecs are allowed.)
+  - apps/web talks to the engine only through packages/engine's message
+    protocol, never by reaching into graph or gpu internals.
+  - Allowed direction (lower may not import higher):
+      core -> color, gpu -> io -> document -> graph -> nodes -> engine
+      media, timeline, paint slot in above document as they arrive.
+
+This separation is the single most important structural rule. It is what
+makes a future native (Tauri) build and a future AI node a plug-in, not a
+rewrite.
+
+===============================================================================
+3. RUNTIME MODEL
+===============================================================================
+
+  Main thread (React UI)
+    - Panels, menus, timeline UI, input capture
+    - Sends commands to the engine; receives state + stats
+             |
+             |  postMessage (typed protocol in packages/engine)
+             v
+  Engine worker (one dedicated Web Worker)
+    - Owns the GPUDevice and all GPU memory
+    - Owns the live document and undo history
+    - Evaluates graphs, renders into an OffscreenCanvas
+      (the viewer <canvas> is transferred to the worker)
+             |
+             v
+  Helper workers (later, as needed)
+    - Decode worker (WebCodecs), file I/O, EXR parsing
+
+Why: the UI never stutters while the GPU or decoder is busy. Doing this
+from Stage 0 avoids a painful move later.
+
+Pen input exception: pointer events arrive on the main thread; they are
+batched (with coalesced samples) and forwarded to the engine each frame.
+
+===============================================================================
+4. DATA MODEL (initial; grows per stage)
+===============================================================================
+
+  Project
+    id, name, schemaVersion, created, modified
+    settings { workingColorSpace, defaultFrameRate, defaultResolution }
+    assets:   Asset[]
+    graphs:   Graph[]           (Photo docs and Comp scripts are graphs)
+    timelines: Timeline[]       (Stage 2)
+
+  Asset
+    id, kind: "image" | "imageSequence" | "video" | "audio"
+    source { storage: "opfs" | "handle" | "url", path }
+    meta { width, height, frameRate?, duration?, colorSpace, bitDepth }
+    provenance { origin, license, addedAt, trainable: false }
+
+  Graph
+    id, name, nodes: Node[], outputNodeId
+
+  Node
+    id, type (e.g. "color.exposure"), typeVersion
+    inputs  { [port]: NodeId | null }
+    params  { [name]: Param }
+
+  Param
+    { kind: "constant", value } | { kind: "keyed", keys: Keyframe[] }
+
+  Time
+    Rational frames: { value: integer, rate: { num, den } }
+    (e.g. 23.976 = 24000/1001). Never floating-point seconds for edits.
+
+  Image (runtime, not saved)
+    { texture, width, height, format: "rgba16float" | "rgba32float",
+      colorSpace, premultiplied: true, domain (pixel bounds) }
+
+All ids are stable strings. Everything saved is plain JSON-serializable.
+
+===============================================================================
+5. THE NODE CONTRACT
+===============================================================================
+
+  interface NodeDefinition {
+    type: string                      // "color.exposure"
+    version: number                   // bump on param/behavior change
+    inputs: PortSpec[]
+    params: ParamSpec[]               // name, type, default, range, UI hint
+    evaluate(ctx: EvalContext): Image // GPU path
+    reference(ctx: CpuContext): CpuImage // CPU path for tests
+    migrate?(old, fromVersion)        // keeps old projects loading
+  }
+
+  Evaluation is pull-based: the viewer asks the output node for frame t;
+  each node asks its inputs. Results are cached by
+    key = hash(node type + version + params at t + input keys)
+  so changing one slider only recomputes what is downstream of it.
+
+  Every built-in node ships with: a GPU implementation, a CPU reference
+  implementation, a golden-image test, and a short docs/learn note.
+
+  Future AI models implement the same interface. Nothing else changes.
+
+===============================================================================
+6. COMMANDS, UNDO AND THE COMMAND LOG
+===============================================================================
+  - The document is changed ONLY through commands:
+      { op: "node.setParam", node, param, value, prev }
+  - Each command knows how to apply and invert itself (undo/redo).
+  - Continuous gestures (dragging a slider) merge into one command.
+  - Every command is appended to a session command log. This is used
+    for: debugging (replay a bug), autosave/crash recovery, education
+    (replay how an edit was made), and later, with consent, AI data.
+
+===============================================================================
+7. PROJECT FILE FORMAT
+===============================================================================
+  A project is a folder (in OPFS, or on disk in Chrome):
+    project.json        the Project object above, schemaVersion'd
+    commands.log        newline-delimited JSON command log (optional)
+    cache/              disposable (thumbnails, proxies, render cache)
+    media/              only when the user chooses "collect media"
+
+  Portable single file: "<name>.vfxv" = zip of the folder, used for
+  export/import, Safari, and sharing.
+
+  Loading always runs schema migrations, so old projects keep opening.
+
+===============================================================================
+8. COLOR PIPELINE
+===============================================================================
+  - Working space: scene-linear ACEScg, 16-bit float (rgba16float),
+    alpha premultiplied.
+  - Input: each asset declares its color space (sRGB, Display P3,
+    Rec.709, linear, ACES2065-1). It is converted on load.
+  - Output: view transform to the display. The canvas is configured for
+    "display-p3" where available (MacBook), sRGB otherwise (Chromebook).
+  - 8-bit is only ever an input/output format, never a processing format.
+  - OCIO configs beyond ACES are supported later as baked 3D LUTs.
+
+===============================================================================
+9. STORAGE
+===============================================================================
+  - OPFS for projects and caches (all browsers).
+  - File System Access API in Chrome for working directly in real
+    folders on the Mac and Chromebook.
+  - navigator.storage.persist() requested on first project save.
+  - Large media is referenced, not copied, when the browser allows it.
+
+===============================================================================
+10. DEVELOPMENT DEBUGGER (built first, in Stage 0)
+===============================================================================
+  Route /dev, compiled ONLY into development builds (excluded from the
+  production export by build config, not just hidden). Never shows
+  secrets; this app holds none in Stage 0.
+
+  Initial panels:
+  - Capabilities: WebGPU adapter, limits, features; WebCodecs codecs;
+    OPFS; File System Access; persistent storage; float16 support;
+    display color gamut.
+  - Pen tester: live readout and graph of pressure, tilt, twist,
+    pointerType and event rate. First real use: verify the Huion tablet
+    on the Chromebook reports pressure (and tilt, if the model has it).
+  - GPU: texture pool usage, frame time, per-node evaluation time.
+  - Engine: worker status, message queue, current document JSON.
+  - Logs: ring buffer of engine/UI events with levels.
+  - Build: version, git commit, current batch id (e.g. B0.3).
+
+  The debugger grows each stage (decode stats in Stage 2, graph view in
+  Stage 3, brush/tile stats in Stage 4).
+
+===============================================================================
+11. TESTING STRATEGY
+===============================================================================
+  - Unit (Vitest): core math, rational time, commands/undo, migrations,
+    CPU reference nodes.
+  - Golden images (Playwright + headless Chromium with WebGPU): render
+    fixed inputs through each node, compare with stored references within
+    a tolerance. GPU output is also compared against the CPU reference.
+  - Round-trip: save -> load -> save produces identical project.json.
+  - Perf (later): playback and render benchmarks tracked over time.
+  - CI runs typecheck, lint, unit tests and build on every push. Golden
+    tests run in CI if headless WebGPU is reliable on the runner;
+    otherwise they run locally on the MacBook before each batch review.
+  - Rule: nothing is reported as tested unless it was actually run.
+
+===============================================================================
+12. DEVICES AND BROWSERS
+===============================================================================
+  Device                      Browser        Role
+  --------------------------  -------------  -------------------------------
+  MacBook Pro M5, 24 GB       Chrome         primary development target
+  MacBook Pro M5, 24 GB       Safari 26      secondary, checked each batch
+  Chromebook + Huion tablet   Chrome         pen input + low-end GPU baseline
+  iPad + Apple Pencil         Safari 26      optional, for Draw (Stage 4)
+
+  The Chromebook doubles as our "minimum spec" machine: if it is usable
+  there, it will be smooth on the M5.
+
+===============================================================================
+13. HOSTING AND DEPLOYMENT
+===============================================================================
+  - Static export can be hosted anywhere (Vercel, GitHub Pages,
+    Cloudflare Pages). Vercel is the natural fit for Next.js.
+  - Required response headers (for multithreaded WebAssembly later):
+      Cross-Origin-Opener-Policy: same-origin
+      Cross-Origin-Embedder-Policy: require-corp
+    These are set by the host config, since static export cannot.
+  - Local development: `pnpm dev` on the MacBook; the Chromebook reaches
+    it over the local network (or via a preview deployment).
+  - Deploying anywhere public is a human decision.
+
+===============================================================================
+14. STAGE 0 FEATURE BATCHES
+===============================================================================
+  Each batch ends with tests passing, docs updated, and a human review
+  before the next batch starts.
+
+  B0.1  Repository scaffold
+        pnpm + Turborepo monorepo, Next.js app shell (empty studio
+        layout with Photo/Edit/Comp/Draw tabs, dark theme), empty
+        packages with READMEs, lint rules for the dependency
+        boundaries, Vitest, CI, README/AGENTS docs.
+  B0.2  Development debugger + capabilities + pen tester
+        /dev route (dev-only), capability panel, pen tester, log panel.
+        Checkpoint: run it on the Chromebook with the Huion.
+  B0.3  GPU foundation + engine worker
+        Engine worker, OffscreenCanvas viewer, texture pool, shader
+        registry, pan/zoom viewer, display-p3 output.
+  B0.4  Image I/O
+        PNG/JPEG via browser decode; EXR read (half/float, RGBA);
+        PNG/EXR write.
+  B0.5  Color + first node + golden tests
+        ACEScg working space, input/view transforms, color.exposure node
+        with GPU and CPU paths, golden-image harness.
+  B0.6  Document, commands, save/load
+        Project model, command system with undo/redo, command log,
+        OPFS save/load, .vfxv export/import, persistent storage.
+
+  STAGE 0 GATE: open an EXR, adjust exposure on the GPU, view it on the
+  MacBook's P3 display with values matching the CPU reference; save,
+  reload, and undo work; the same build runs on the Chromebook.
+
+===============================================================================
+15. RISKS SPECIFIC TO THIS PLAN
+===============================================================================
+  - Next.js is server-oriented; some tutorials assume a server. Rule:
+    every WebGPU/engine import is client-only (dynamic import, ssr off).
+  - Headless WebGPU in CI may be unreliable. Fallback in Section 11.
+  - Chromebook GPU may lack some WebGPU features (e.g. float32
+    filtering). Capability panel detects this; engine falls back to
+    rgba16float, which is our default anyway.
+  - Huion pressure on ChromeOS depends on model/driver. Verified in B0.2
+    before any brush work is designed around it.
+
+===============================================================================
+16. HUMAN-OWNED TASKS
+===============================================================================
+  - Approve this plan (or request changes).
+  - Run B0.2 on the Chromebook with the Huion and report what the pen
+    tester shows.
+  - Decide when/where anything is deployed publicly.
+  - Provide test media (a few EXRs, phone videos) that we are allowed
+    to use, ideally your own footage.

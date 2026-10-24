@@ -1,6 +1,6 @@
 VFXVIDEO PLATFORM DESIGN
-Working draft v0.2 (Phase 1: Requirements / Phase 2: Technology Validation)
-Status: PROPOSAL. Stack in Section 4 awaits approval (see Section 10).
+Working draft v0.3 (Phase 1: Requirements / Phase 2: Technology Validation)
+Status: APPROVED direction. Detailed plan: docs/ARCHITECTURE.txt
 
 ===============================================================================
 0. DECISIONS SO FAR
@@ -11,6 +11,10 @@ Status: PROPOSAL. Stack in Section 4 awaits approval (see Section 10).
   D4  Dev machine    MacBook Pro, Apple M5, 24 GB unified memory.
   D5  Open source    Yes.
   D6  Scope added    A Procreate-style drawing and animation studio.
+  D7  Framework      Next.js (App Router, static export) + TypeScript.
+  D8  License        Apache-2.0.
+  D9  Pen hardware   Huion pen tablet on a Chromebook (Chrome/ChromeOS).
+  D10 Stage order    Photo, Video and VFX come before Draw.
 
 ===============================================================================
 1. VISION
@@ -86,10 +90,10 @@ because these pieces now ship in the browsers we care about:
   - WebCodecs  hardware video decode/encode (uses the M5 media engine).
   - OPFS       fast private on-disk storage for caches and projects.
   - Pointer Events with pressure, tilt and coalesced/predicted events,
-               which is what Apple Pencil drawing needs in Safari.
+               which pen drawing needs (Huion on Chrome, Pencil on Safari).
 
-Big bonus of PWA: the SAME app runs on the MacBook and on an iPad with
-Apple Pencil. The Draw page is meant for the iPad.
+Big bonus of PWA: the SAME app runs on the MacBook, the Chromebook
+(with the Huion tablet), and an iPad with Apple Pencil if one is added.
 
 3.1 Honest limits, and how we handle them
 
@@ -131,14 +135,16 @@ Apple Pencil. The Draw page is meant for the iPad.
   only where measured performance demands it.
 
 4.2 Tooling
-  - Vite            dev server and build; PWA plugin for install/offline
+  - Next.js         app framework, used as a static export (no server
+                    needed); service worker for install/offline
   - Vitest          unit tests
   - Playwright      browser tests + golden-image (pixel) tests
   - ESLint/Prettier lint and format
   - pnpm            package manager, monorepo workspaces
 
 4.3 UI
-  - Solid or React for panels and menus (decide in Phase 3 plan).
+  - React (via Next.js) + Tailwind CSS + shadcn/ui components for the
+    clean, modern Next.js/Vercel look. Dark theme first.
   - Canvas viewers are our own WebGPU surfaces, never DOM drawing.
 
 4.4 Libraries (open source, license-compatible)
@@ -154,10 +160,9 @@ Apple Pencil. The Draw page is meant for the iPad.
   Every dependency is checked for license before adoption. We avoid
   GPL-only libraries so a commercial option stays open.
 
-4.5 Project license (recommendation)
-  Apache-2.0 for our code: open source, allows commercial use, includes
-  a patent grant. (Alternative: MPL-2.0 if we want changes to our files
-  to stay open.) Needs your decision before the first code commit.
+4.5 Project license
+  Apache-2.0 (decided). Open source, allows commercial use, includes a
+  patent grant. See LICENSE.
 
 4.6 AI later
   - Training: Python + PyTorch, offline.
@@ -169,7 +174,7 @@ Apple Pencil. The Draw page is meant for the iPad.
 ===============================================================================
 
 5.1 Input
-  - Apple Pencil via Pointer Events: pressure, tilt (altitude/azimuth),
+  - Huion tablet (Chrome) and Apple Pencil (Safari) via Pointer Events: pressure, tilt (altitude/azimuth),
     coalesced events for smooth strokes, predicted events for low lag.
   - Palm rejection: ignore touch input while a pen is in contact.
   - Gestures (Procreate conventions): two-finger tap = undo,
@@ -225,22 +230,16 @@ STAGE 1 - Photo: Image Editing
   GATE: a real retouch job finished in our app, compared side by side
         with an established editor.
 
-STAGE 2 - Draw: Painting and Animation
-  - Pencil input, brush engine, gestures, streamline
-  - Frame-by-frame animation, onion skin, export
-  GATE: on iPad with Apple Pencil, paint an illustration and a 2-second
-        looping animation with no perceptible input lag.
-
-STAGE 3 - Edit: Video
+STAGE 2 - Edit: Video
   - WebCodecs decode, frame cache, prefetch, proxies
   - Web Audio playback and sync
   - Timeline: tracks, trim/ripple/roll/slip/slide, transitions, titles
-  - Per-clip effects (reuse Stage 1 nodes); Draw animations as clips
+  - Per-clip effects (reuse Stage 1 nodes)
   - Export via WebCodecs; OpenTimelineIO import/export
   GATE: cut a 5-minute multi-track 4K H.264/HEVC project on the M5 with
         real-time playback, frame-accurate export, audio in sync.
 
-STAGE 4 - Comp: 2D VFX
+STAGE 3 - Comp: 2D VFX
   - Node graph editor; merges and correct premultiplication
   - Keying (chroma/difference/luma), spill suppression
   - Rotoscoping (bezier, B-spline, feathering, motion blur)
@@ -248,6 +247,14 @@ STAGE 4 - Comp: 2D VFX
   - Blur/defocus, glow, grain, lens distortion
   GATE: a professional-standard green-screen composite and a screen
         replacement shot.
+
+STAGE 4 - Draw: Painting and Animation
+  - Pencil input, brush engine, gestures, streamline
+  - Frame-by-frame animation, onion skin, export
+  - Draw animations usable as clips in Edit and Comp
+  GATE: with the Huion tablet (and Apple Pencil if available), paint an
+        illustration and a 2-second looping animation with no
+        perceptible input lag.
 
 STAGE 5 - Native and Advanced VFX (only if needed by then)
   - Tauri desktop build, Rust hot paths, pro codecs, full OCIO
@@ -312,12 +319,7 @@ STAGE 6 - AI (after Stages 0-4 gates pass)
   - AI data rights: provenance from day one.
 
 ===============================================================================
-10. STILL NEEDED BEFORE CODING
+10. NEXT STEP
 ===============================================================================
-  A1. Approve the stack: PWA, TypeScript + WebGPU/WGSL, Vite, pnpm.
-  A2. Pick the license: Apache-2.0 (recommended) or MPL-2.0.
-  A3. Do you have an iPad with Apple Pencil (iPadOS 26) for the Draw page?
-  A4. Confirm stage order: Photo (1) before Draw (2), or Draw first?
-
-NEXT STEP: Phase 3 architectural plan (data model, project file format,
-node contract, module boundaries), then Stage 0.
+Phase 3 architectural plan is in docs/ARCHITECTURE.txt. Once approved,
+Stage 0 begins with batch B0.1.
