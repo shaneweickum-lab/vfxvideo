@@ -60,6 +60,8 @@ Never report something as tested unless it was run.
 
 # Current position
 
-Stage 0. Batch B0.1 (scaffold) complete, awaiting human review.
-Next: B0.2, development debugger + capabilities + pen tester.
+Stage 0. B0.1 approved. B0.2 (debugger at /dev) complete, awaiting review.
+Next: B0.3, GPU foundation + engine worker.
+The /dev debugger is gated in `apps/web/next.config.ts`; debugger route files
+use the `.dev.tsx` extension and must never be imported by normal pages.
 See `docs/BATCH_LOG.txt` for open issues.

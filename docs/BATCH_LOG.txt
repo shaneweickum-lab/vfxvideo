@@ -2,7 +2,77 @@ BATCH LOG
 Newest first. Each entry is the batch completion review.
 
 ===============================================================================
-B0.1  Repository scaffold                                   Status: IN REVIEW
+B0.2  Development debugger + capabilities + pen tester      Status: IN REVIEW
+===============================================================================
+Objective
+  A developer-only /dev page that shows what the current machine and
+  browser can do, verifies pen input, and collects logs.
+
+Delivered
+  - packages/devtools (worker-safe, unit tested):
+      LogBuffer          ring buffer with subscribe
+      probeCapabilities  WebGPU adapter/features/limits, WebCodecs 4K
+                         decode+encode for H.264/HEVC/VP9/AV1, OPFS,
+                         persistent storage, quota, wasm SIMD/memory64,
+                         threads, OffscreenCanvas
+      PenStats           pressure verdict (real/limited/none), tilt, twist,
+                         event rate vs coalesced sample rate
+  - apps/web /dev route with three tabs: Capabilities (+ window-only
+    probes: display gamut, HDR, touch, coalesced/predicted events, File
+    System Access), Pen tester (live readout, pressure graph, verdict),
+    Logs (captures window errors, unhandled rejections, console
+    warn/error). "Copy report" buttons export JSON for sharing.
+  - Status bar shows a "debugger" link when devtools are enabled.
+  - docs/learn/01 on the debugger and pen input.
+
+Gating (how /dev stays out of production)
+  Enabled when NODE_ENV=development, VERCEL_ENV=preview, or
+  ENABLE_DEVTOOLS=1. The route file is page.dev.tsx and ".dev.tsx" is a
+  page extension only when enabled, so production builds do not contain
+  it. The debugger exposes no secrets (the app has none).
+
+Tests performed
+  - 18 unit tests in packages/devtools (log buffer, pen verdicts and rates,
+    capability probe with fakes, real WebAssembly.validate).
+  - pnpm check passes on all workspaces.
+  - Production build: no /dev route, no debugger strings in output.
+  - Preview build (VERCEL_ENV=preview): /dev present.
+  - Headless Chromium against the preview build: capability probe
+    completes (SwiftShader software GPU); a simulated pen stroke via the
+    Chrome DevTools Protocol with rising pressure and tilt gave
+    "pressure: real", tilt "yes", 81 levels; logs captured; no console
+    errors.
+
+Tests NOT performed
+  - Real hardware: MacBook (Chrome/Safari), Chromebook + Huion. The
+    simulated pen proves the code path, not the device.
+  - Coalesced sample rate above 60 Hz (simulation sends one sample per
+    event).
+
+Issues
+  DEVIATION FROM APPROVED PLAN (needs owner decision)
+  - docs/ARCHITECTURE.txt Section 10 says /dev is compiled ONLY into
+    development builds. B0.2 also enables it on Vercel preview builds so
+    the pen tester can be used on the Chromebook. The protected doc was
+    not edited. If approved, Section 10 should be updated to match.
+  LOW / FUTURE RISK
+  - The pen tester draws with Canvas 2D; it is a diagnostic, not the
+    brush engine (GPU, Stage 4).
+  - Vercel must expose system env vars (on by default) for VERCEL_ENV to
+    be visible at build time; otherwise previews build without /dev.
+
+Human-required actions
+  - Open /dev on the Vercel preview on the Chromebook with the Huion, run
+    the pen test, press "Copy pen report", and paste the result.
+  - Also "Copy report" from the Capabilities tab on the MacBook in Chrome
+    and in Safari.
+  - Decide on the deviation above.
+
+Next batch
+  B0.3  GPU foundation + engine worker.
+
+===============================================================================
+B0.1  Repository scaffold                                   Status: APPROVED
 ===============================================================================
 Objective
   Monorepo, Next.js app shell, engine package skeletons, lint-enforced

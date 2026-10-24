@@ -1,0 +1,52 @@
+LEARN 01: THE DEBUGGER AND HOW PEN INPUT WORKS
+Stage 0, batch B0.2
+
+Why a debugger before features
+------------------------------
+Graphics bugs are often invisible: a shader silently outputs black, a codec
+quietly is not supported, a pen reports fake pressure. The /dev page makes
+the machine's real abilities visible before we build on top of them.
+
+Open it at /dev (local `pnpm dev`, or a Vercel preview deployment). It is
+not compiled into production builds at all: its page file is named
+`page.dev.tsx`, and next.config.ts only treats ".dev.tsx" as a page
+extension when devtools are enabled.
+
+Capabilities tab
+----------------
+  - WebGPU adapter: which GPU the browser gives us, and its limits.
+    maxTextureDimension2D is the largest image we can hold in one texture
+    (8192 means an 8K-wide image; bigger needs tiling).
+  - Features like shader-f16 (half-precision math) and float32-filterable
+    (smooth sampling of 32-bit float images) decide which code paths the
+    engine can use.
+  - Codecs are tested at 4K for decode AND encode separately. A browser
+    can often play a format it cannot export.
+  - "Shared memory threads: NO" is expected. It needs special server
+    headers we will add when we need multithreaded WebAssembly.
+
+How a pen talks to the browser
+------------------------------
+Every pen, mouse and finger produces PointerEvents. Each event carries:
+
+  pressure        0 to 1. A mouse reports exactly 0.5 while pressed; that is
+                  how the tester spots "fake" pressure.
+  tiltX, tiltY    how far the pen leans, in degrees (-90 to 90).
+  altitude,       the same lean, as angle above the surface and compass
+  azimuth         direction. Easier math for brushes.
+  twist           barrel rotation; only some pens have it.
+
+Screens refresh about 60 times a second, but a good tablet reports 200+
+times a second. Browsers bundle the extra reports into one event; you get
+them back with getCoalescedEvents(). Compare "event rate" with "sample
+rate" in the tester: the difference is detail a brush engine would lose
+without coalesced events.
+
+Try it
+------
+  1. Open /dev, Pen tester tab, on the Chromebook with the Huion.
+  2. Draw one stroke from very light to very heavy. "pressure levels"
+     should climb into the hundreds and the verdict should say "real".
+  3. Hover and lean the pen: tilt values should change (if the model
+     supports tilt).
+  4. Press "Copy pen report" and paste the result into the chat.

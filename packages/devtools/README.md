@@ -6,7 +6,7 @@ PURPOSE: Diagnostics collectors used by the /dev debugger.
 
 CONTAINS: Log ring buffer, timing probes, counters, capability snapshot types. Never holds secrets.
 
-STATUS: Scaffold (empty). Planned in batch B0.2.
+STATUS: B0.2. Exports LogBuffer, probeCapabilities, PenStats. Consumed by apps/web /dev.
 
 MAY IMPORT: core. Enforced by `eslint.config.mjs` at the repo root.
 

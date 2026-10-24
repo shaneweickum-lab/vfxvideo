@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { PageTabs } from "@/components/studio/page-tabs";
 import { ToolRail } from "@/components/studio/tool-rail";
-import { BUILD_STAGE } from "@/lib/studio-pages";
+import { BUILD_INFO, DEVTOOLS_ENABLED } from "@/lib/build-info";
 
 export default function StudioLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -30,10 +30,17 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
 
       <footer className="flex h-7 shrink-0 items-center justify-between border-t px-3 font-mono text-[11px] text-muted-foreground">
         <span>
-          Stage {BUILD_STAGE.stage} · {BUILD_STAGE.batch}
-          <span className="hidden sm:inline"> · {BUILD_STAGE.label}</span>
+          Stage {BUILD_INFO.stage} · {BUILD_INFO.batch}
+          <span className="hidden sm:inline"> · {BUILD_INFO.label}</span>
         </span>
-        <span>engine: not started</span>
+        <span className="flex items-center gap-3">
+          <span>engine: not started</span>
+          {DEVTOOLS_ENABLED ? (
+            <Link href="/dev" className="text-amber-300 hover:underline">
+              debugger
+            </Link>
+          ) : null}
+        </span>
       </footer>
     </div>
   );

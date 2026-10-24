@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@vfxvideo/devtools": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "geist": "1.8.2",
@@ -28,6 +29,7 @@
     "@types/node": "catalog:",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@webgpu/types": "catalog:",
     "eslint": "catalog:",
     "eslint-config-next": "16.4.3",
     "tailwindcss": "4.3.3",
