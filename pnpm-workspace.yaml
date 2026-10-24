@@ -1,0 +1,20 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Shared dependency versions. Packages reference these as "catalog:".
+catalog:
+  "@eslint/js": 9.39.5
+  "@types/node": 26.6.5
+  "@webgpu/types": 0.1.74
+  eslint: 9.39.5
+  globals: 17.13.0
+  prettier: 3.9.10
+  turbo: 2.11.10
+  typescript: 6.0.3
+  typescript-eslint: 8.72.0
+  vitest: 5.0.5
+
+onlyBuiltDependencies:
+  - sharp
+  - unrs-resolver

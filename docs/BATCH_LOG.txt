@@ -1,0 +1,56 @@
+BATCH LOG
+Newest first. Each entry is the batch completion review.
+
+===============================================================================
+B0.1  Repository scaffold                                   Status: IN REVIEW
+===============================================================================
+Objective
+  Monorepo, Next.js app shell, engine package skeletons, lint-enforced
+  layering, tests, CI, documentation. No business logic.
+
+Delivered
+  - pnpm workspace + Turborepo; shared versions via pnpm catalog
+  - apps/web: Next.js 16 static export, Tailwind v4, shadcn/ui setup,
+    Geist fonts, dark studio theme, PWA manifest + icons
+  - Launcher page (/) and studio shell with Photo / Edit / Comp / Draw
+    pages: page tabs, per-page tool rail (disabled), viewer placeholder,
+    inspector, status bar showing the current batch
+  - packages/: core, devtools, color, gpu, io, document, graph, nodes,
+    engine (empty, each with an agent README)
+  - Layering enforced two ways: ESLint LAYERS table + WebWorker-only lib
+  - CI workflow: format check, typecheck, lint, test, build
+  - README.md, AGENTS.md, apps/web/README.md, docs/learn/00
+
+Tests performed
+  - pnpm check: typecheck, lint, test pass on all 10 workspaces
+  - pnpm build: static export generated (/, /photo, /edit, /comp, /draw,
+    manifest, icons)
+  - Guard check: an upward import and a React import in packages/core both
+    fail lint; `document` in packages/core fails typecheck; an allowed
+    import (io -> gpu) passes. Test files removed afterwards.
+  - Visual check: headless Chromium screenshots of launcher, Edit page at
+    1440x900 and Photo page at 390x844; no console errors.
+
+Tests NOT performed
+  - CI has not run yet on GitHub (runs on this push).
+  - Not opened in Safari, on the MacBook, or on the Chromebook.
+  - PWA install flow not tested (no service worker yet; see below).
+  - No unit tests exist yet; there is no logic to test.
+
+Issues
+  LOW / FUTURE RISK
+  - No service worker yet, so the app installs but is not offline-capable.
+    Planned alongside B0.3 or as its own small batch.
+  - ESLint 9 is used because eslint-config-next's plugins do not yet
+    support ESLint 10; TypeScript 6.0 because typescript-eslint does not
+    yet support TypeScript 7. Revisit when they catch up.
+  - Static export cannot set COOP/COEP headers (needed later for threaded
+    WebAssembly). Must be set in the hosting config when we deploy.
+
+Human-required actions
+  - Review the shell on the MacBook (Chrome + Safari) and the Chromebook:
+    pnpm install && pnpm dev, then open the printed URL.
+  - Approve B0.1, or request changes, before B0.2 starts.
+
+Next batch
+  B0.2  Development debugger + capabilities panel + pen tester (Huion).

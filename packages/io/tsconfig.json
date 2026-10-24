@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // WebWorker instead of DOM: engine code must run inside a worker,
+    // so DOM APIs (document, window, HTMLElement) are deliberately unavailable.
+    "lib": ["ES2023", "WebWorker"],
+    "types": ["@webgpu/types"]
+  },
+  "include": ["src"]
+}
