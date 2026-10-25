@@ -2,7 +2,7 @@ BATCH LOG
 Newest first. Each entry is the batch completion review.
 
 ===============================================================================
-B0.2  Development debugger + capabilities + pen tester      Status: IN REVIEW
+B0.2  Development debugger + capabilities + pen tester      Status: APPROVED
 ===============================================================================
 Objective
   A developer-only /dev page that shows what the current machine and
@@ -50,11 +50,8 @@ Tests NOT performed
     event).
 
 Issues
-  DEVIATION FROM APPROVED PLAN (needs owner decision)
-  - docs/ARCHITECTURE.txt Section 10 says /dev is compiled ONLY into
-    development builds. B0.2 also enables it on Vercel preview builds so
-    the pen tester can be used on the Chromebook. The protected doc was
-    not edited. If approved, Section 10 should be updated to match.
+  RESOLVED: /dev on Vercel preview builds was approved by the owner;
+  docs/ARCHITECTURE.txt Section 10 updated (v0.2).
   LOW / FUTURE RISK
   - The pen tester draws with Canvas 2D; it is a diagnostic, not the
     brush engine (GPU, Stage 4).
@@ -66,7 +63,6 @@ Human-required actions
     the pen test, press "Copy pen report", and paste the result.
   - Also "Copy report" from the Capabilities tab on the MacBook in Chrome
     and in Safari.
-  - Decide on the deviation above.
 
 Next batch
   B0.3  GPU foundation + engine worker.

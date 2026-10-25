@@ -1,6 +1,6 @@
 VFXVIDEO ARCHITECTURE PLAN
-Phase 3: Architectural Planning. Version 0.1.
-Status: PROPOSAL awaiting approval. No application code exists yet.
+Phase 3: Architectural Planning. Version 0.2.
+Status: APPROVED. Implementation in progress (see docs/BATCH_LOG.txt).
 Read with: docs/PLATFORM_DESIGN.txt (the why); this file is the how.
 
 CONTENTS
@@ -230,9 +230,13 @@ All ids are stable strings. Everything saved is plain JSON-serializable.
 ===============================================================================
 10. DEVELOPMENT DEBUGGER (built first, in Stage 0)
 ===============================================================================
-  Route /dev, compiled ONLY into development builds (excluded from the
-  production export by build config, not just hidden). Never shows
-  secrets; this app holds none in Stage 0.
+  Route /dev, compiled ONLY into development and Vercel preview builds
+  (NODE_ENV=development, VERCEL_ENV=preview, or ENABLE_DEVTOOLS=1).
+  Production builds exclude it by build config, not just by hiding it:
+  debugger route files use the ".dev.tsx" extension, registered as a page
+  extension only when enabled. Previews are included so the pen tester
+  can run on test devices (the Chromebook). Never shows secrets; this app
+  holds none in Stage 0.
 
   Initial panels:
   - Capabilities: WebGPU adapter, limits, features; WebCodecs codecs;
