@@ -2,6 +2,77 @@ BATCH LOG
 Newest first. Each entry is the batch completion review.
 
 ===============================================================================
+B0.3  GPU foundation + engine worker                         Status: IN REVIEW
+===============================================================================
+Objective
+  The engine runs in a Web Worker, owns the WebGPU device, and renders a
+  pannable, zoomable viewer into a canvas transferred from the UI.
+
+Delivered
+  - packages/gpu:
+      acquireDevice     high-performance adapter, max texture/buffer
+                        limits, optional features, lost/error callbacks
+      TexturePool       reuse of same-size textures, byte accounting
+      ShaderRegistry    compile once, forward WGSL compiler messages
+      createTestPattern compute shader: bars, ramp, 1px checker, hue sweep,
+                        grid, circle (rgba16float, linear)
+      Viewer            render pipeline to an OffscreenCanvas; rgba16float
+                        canvas with Display P3 when available; temporary
+                        display transform (sRGB->P3 matrix + sRGB curve);
+                        nearest filtering above 200%
+      viewport math     fit, pan, zoom-about-point, coordinate mapping
+  - packages/engine: typed message protocol, Engine class (render on
+    demand, stats every 250 ms, logs forwarded to UI), worker entry,
+    EngineClient for the main thread.
+  - apps/web: Photo page shows the live viewer (drag/scroll pan, pinch or
+    Ctrl/Cmd+scroll zoom, F fit, 1 = 100%, +/-); status bar shows engine
+    state and GPU; clear message when WebGPU is missing; /dev Engine tab
+    with adapter, frame timings, texture memory and its own test viewer.
+  - docs/learn/02.
+
+Tests performed
+  - Unit: 12 in gpu (viewport math, texture pool), 3 in engine (client),
+    18 in devtools. pnpm check passes on all workspaces.
+  - Production build: no /dev. Preview build: /dev with Engine tab.
+  - Headless Chromium (SwiftShader software GPU over Vulkan) against the
+    preview build: engine reaches "ready"; test pattern renders correctly
+    at fit (52%); Ctrl+scroll zoom to 382% keeps the point under the
+    cursor and shows hard pixels; drag pans; "1" sets 100%; leaving and
+    returning to Photo re-attaches a new canvas and renders; Engine tab
+    shows frames, timings, canvas format (rgba16float), 15.8 MB pattern
+    texture; engine logs appear in the Logs tab; no console errors.
+  - Found while testing: headless Chromium without Vulkan flags cannot
+    present WebGPU canvases ("Instance reference no longer exists"). Not
+    an app bug; future browser tests must use
+    --enable-features=Vulkan --use-vulkan=swiftshader.
+
+Tests NOT performed
+  - Real GPUs: Apple M5 (Chrome, Safari), Chromebook. Display P3 output
+    path not exercised (headless reports an sRGB display).
+  - Safari specifics: rgba16float canvas + toneMapping, requestAnimationFrame
+    in workers (falls back to setTimeout if missing).
+  - Trackpad gestures (simulated wheel events only); touch pinch is not
+    implemented.
+
+Issues
+  LOW / FUTURE RISK
+  - No mipmaps: zoomed-out views alias on fine detail (visible on the
+    checkerboard). Needed before Photo work is judged on quality.
+  - Turbopack also copies engine.worker.ts into static/media as a plain
+    asset (unused; the real worker is a bundled chunk). Harmless; revisit
+    if it causes confusion.
+  - The display transform is a placeholder until B0.5 (color pipeline).
+
+Human-required actions
+  - Open the Vercel preview on the MacBook in Chrome and Safari, and on
+    the Chromebook: check the Photo page renders and pans/zooms smoothly,
+    and that the status bar shows the GPU name. Send the /dev reports
+    (Capabilities, Pen tester) if not sent yet.
+
+Next batch
+  B0.4  Image I/O: open PNG/JPEG/EXR, show them in the viewer, save PNG/EXR.
+
+===============================================================================
 B0.2  Development debugger + capabilities + pen tester      Status: APPROVED
 ===============================================================================
 Objective

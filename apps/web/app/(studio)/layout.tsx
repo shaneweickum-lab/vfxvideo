@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { EngineStatusLabel } from "@/components/studio/engine-status";
 import { PageTabs } from "@/components/studio/page-tabs";
 import { ToolRail } from "@/components/studio/tool-rail";
 import { BUILD_INFO, DEVTOOLS_ENABLED } from "@/lib/build-info";
@@ -34,7 +35,7 @@ export default function StudioLayout({ children }: { children: React.ReactNode }
           <span className="hidden sm:inline"> · {BUILD_INFO.label}</span>
         </span>
         <span className="flex items-center gap-3">
-          <span>engine: not started</span>
+          <EngineStatusLabel />
           {DEVTOOLS_ENABLED ? (
             <Link href="/dev" className="text-amber-300 hover:underline">
               debugger

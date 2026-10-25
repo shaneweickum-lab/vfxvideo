@@ -6,7 +6,7 @@ PURPOSE: The engine worker.
 
 CONTAINS: Worker entry point that owns the GPUDevice and the live document, plus the typed message protocol the UI uses to talk to it.
 
-STATUS: Scaffold (empty). Planned in batch B0.3.
+STATUS: B0.3. Message protocol (`src/protocol.ts`), Engine, worker entry (`@vfxvideo/engine/worker`), EngineClient.
 
 MAY IMPORT: core, devtools, color, gpu, io, document, graph, nodes. Enforced by `eslint.config.mjs` at the repo root.
 

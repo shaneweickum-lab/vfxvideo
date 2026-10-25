@@ -1,3 +1,7 @@
-// @vfxvideo/gpu: WebGPU foundation.
-// Scaffold only. Implementation begins in batch B0.3.
-export {};
+// @vfxvideo/gpu: WebGPU foundation. Device, texture pool, shaders, viewer.
+export * from "./device";
+export * from "./shaders";
+export * from "./test-pattern";
+export * from "./texture-pool";
+export * from "./viewer";
+export * from "./viewport";

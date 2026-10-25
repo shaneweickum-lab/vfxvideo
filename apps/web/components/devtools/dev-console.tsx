@@ -5,6 +5,7 @@ import { Tabs } from "radix-ui";
 import { useEffect } from "react";
 
 import { CapabilitiesPanel } from "@/components/devtools/capabilities-panel";
+import { EnginePanel } from "@/components/devtools/engine-panel";
 import { LogPanel } from "@/components/devtools/log-panel";
 import { PenTester } from "@/components/devtools/pen-tester";
 import { BUILD_INFO } from "@/lib/build-info";
@@ -12,6 +13,7 @@ import { installGlobalLogCapture } from "@/lib/devtools/app-log";
 
 const TABS = [
   { id: "capabilities", label: "Capabilities" },
+  { id: "engine", label: "Engine" },
   { id: "pen", label: "Pen tester" },
   { id: "logs", label: "Logs" },
 ] as const;
@@ -60,6 +62,9 @@ export function DevConsole() {
         </Tabs.List>
         <Tabs.Content value="capabilities">
           <CapabilitiesPanel />
+        </Tabs.Content>
+        <Tabs.Content value="engine">
+          <EnginePanel />
         </Tabs.Content>
         <Tabs.Content value="pen" forceMount className="data-[state=inactive]:hidden">
           <PenTester />

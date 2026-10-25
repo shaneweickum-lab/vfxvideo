@@ -6,7 +6,7 @@ PURPOSE: WebGPU foundation.
 
 CONTAINS: Device acquisition, texture pool, shader registry, viewer surface (OffscreenCanvas), display-p3 output.
 
-STATUS: Scaffold (empty). Planned in batch B0.3.
+STATUS: B0.3. Device, TexturePool, ShaderRegistry, test pattern, Viewer, viewport math.
 
 MAY IMPORT: core, devtools. Enforced by `eslint.config.mjs` at the repo root.
 

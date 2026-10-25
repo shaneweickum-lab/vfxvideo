@@ -1,0 +1,63 @@
+LEARN 02: THE GPU AND THE ENGINE WORKER
+Stage 0, batch B0.3
+
+What you see
+------------
+Open the Photo page. The test pattern is drawn by the GPU, inside a
+background worker, through WebGPU. Try:
+  - drag, or two-finger scroll: pan
+  - pinch, or Ctrl/Cmd + scroll: zoom around the pointer
+  - F: fit     1: 100% (one image pixel per screen pixel)     + / -: zoom
+  - double-click: fit
+
+Two threads
+-----------
+The browser page (React, buttons, panels) runs on the MAIN thread. The
+ENGINE runs in a Web Worker, a second thread. The viewer <canvas> is
+handed over with transferControlToOffscreen(), so the worker draws into
+it directly. If the engine is busy, the interface still responds.
+
+They talk only by messages (packages/engine/src/protocol.ts):
+  UI -> engine:  attach, resize, view.pan, view.zoom, view.fit ...
+  engine -> UI:  ready, view, stats, log, error
+
+The four GPU objects you meet first
+-----------------------------------
+  Device      your connection to the GPU. Everything is created from it.
+  Texture     an image living in GPU memory. Ours are "rgba16float":
+              four 16-bit floating-point channels, so values can go below
+              0 and above 1 (light brighter than white) without clipping.
+  Shader      a small program in WGSL that runs on the GPU, once per pixel
+              (or per work item). See packages/gpu/src/test-pattern.ts and
+              viewer.ts.
+  Pipeline    a shader plus how its inputs and outputs are wired.
+
+Compute shaders vs render shaders
+---------------------------------
+The test pattern is made by a COMPUTE shader: it writes each pixel of a
+texture directly. The viewer uses a RENDER pipeline: one big triangle
+covers the canvas, and the fragment shader decides each screen pixel's
+color by looking up the image under it (after pan and zoom).
+
+Why the image is stored "linear" and converted for display
+----------------------------------------------------------
+Light adds up linearly in the real world, so all math (blurs, blends,
+exposure) is done on linear values. Screens expect "encoded" values (the
+sRGB curve). The viewer converts at the last moment. On a wide-gamut
+display (MacBook) it also converts sRGB primaries to Display P3 so colors
+are shown accurately rather than over-saturated. B0.5 replaces this with
+the full color pipeline (ACEScg working space).
+
+Rendering only when needed
+--------------------------
+The engine draws a frame only when something changed (pan, zoom, resize).
+That keeps laptops cool. The Engine tab in /dev shows the frame count,
+CPU time to prepare a frame, and time until the GPU finished it.
+
+Things to notice
+----------------
+  - Zoomed out, the 1-pixel checkerboard shows moire patterns. That is
+    aliasing: many image pixels map to one screen pixel and the viewer
+    picks only one. Proper downsampling (mipmaps) is future work.
+  - Zoomed in past 200%, pixels become hard-edged squares on purpose, so
+    you can inspect exact pixel values.

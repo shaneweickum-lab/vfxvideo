@@ -7,8 +7,9 @@ one shared engine.
 It is an internal tool and a learning project first. Every stage of the build
 comes with notes explaining how it works, in [`docs/learn/`](docs/learn/).
 
-> **Status:** Stage 0, batch B0.2. The app shell and a developer debugger
-> (`/dev`, dev and preview builds only) exist; nothing edits images yet. See the [roadmap](docs/PLATFORM_DESIGN.txt) (Section 6).
+> **Status:** Stage 0, batch B0.3. The Photo page shows a GPU-rendered test
+> pattern you can pan and zoom; images cannot be opened yet. A developer
+> debugger lives at `/dev` (dev and preview builds only).
 
 ## The four pages
 

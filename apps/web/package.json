@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@vfxvideo/devtools": "workspace:*",
+    "@vfxvideo/engine": "workspace:*",
+    "@vfxvideo/gpu": "workspace:*",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "geist": "1.8.2",

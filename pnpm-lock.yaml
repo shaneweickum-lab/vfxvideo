@@ -68,6 +68,12 @@ importers:
       '@vfxvideo/devtools':
         specifier: workspace:*
         version: link:../../packages/devtools
+      '@vfxvideo/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@vfxvideo/gpu':
+        specifier: workspace:*
+        version: link:../../packages/gpu
       class-variance-authority:
         specifier: 0.7.1
         version: 0.7.1
@@ -179,6 +185,13 @@ importers:
         version: 5.0.5(@types/node@26.6.5)(vite@8.3.5(@types/node@26.6.5)(jiti@2.7.0))
 
   packages/engine:
+    dependencies:
+      '@vfxvideo/devtools':
+        specifier: workspace:*
+        version: link:../devtools
+      '@vfxvideo/gpu':
+        specifier: workspace:*
+        version: link:../gpu
     devDependencies:
       '@webgpu/types':
         specifier: 'catalog:'

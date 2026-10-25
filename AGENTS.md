@@ -60,8 +60,10 @@ Never report something as tested unless it was run.
 
 # Current position
 
-Stage 0. B0.1 approved. B0.2 (debugger at /dev) complete, awaiting review.
-Next: B0.3, GPU foundation + engine worker.
+Stage 0. B0.1 and B0.2 approved. B0.3 (GPU foundation + engine worker)
+complete, awaiting review. Next: B0.4, image I/O.
 The /dev debugger is gated in `apps/web/next.config.ts`; debugger route files
 use the `.dev.tsx` extension and must never be imported by normal pages.
+Browser tests of WebGPU canvases in headless Chromium need
+`--enable-features=Vulkan --use-vulkan=swiftshader --use-angle=swiftshader`.
 See `docs/BATCH_LOG.txt` for open issues.

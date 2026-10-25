@@ -113,4 +113,4 @@ export function getStudioPage(id: StudioPageId): StudioPage {
 }
 
 // Current development position, shown in the status bar.
-export const BUILD_STAGE = { stage: 0, batch: "B0.2", label: "Development debugger" } as const;
+export const BUILD_STAGE = { stage: 0, batch: "B0.3", label: "GPU foundation" } as const;
